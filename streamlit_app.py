@@ -2,71 +2,53 @@
 import streamlit as st
 import requests
 import pandas as pd
+#from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark.functions import col
 
-# App title and instructions
-st.title(":cup_with_straw: Customize Your Smoothie :cup_with_straw:")
-st.write("Choose up to 5 fruits for your custom smoothie!")
+#st.text(smoothiefroot_response.json())
 
-# Name input
-name_on_order = st.text_input("Name on Smoothie:")
-
-# Connect to Snowflake
-cnx = st.connection("snowflake")
-session = cnx.session()
-
-# Query fruit options
-fruit_df = session.table("smoothies.public.fruit_options").select(
-    col("FRUIT_NAME"), col("SEARCH_ON")
-).to_pandas()
-
-# Show table of available fruits
-st.subheader("Available Fruits")
-st.dataframe(fruit_df, use_container_width=True)
-
-# Get fruit names as a list for multiselect
-fruit_list = fruit_df["FRUIT_NAME"].tolist()
-
-# Multiselect for ingredients (up to 5)
-selected_fruits = st.multiselect(
-    "Choose up to 5 ingredients:",
-    options=fruit_list,
-    max_selections=5
+# Write directly to the app
+st.title(f":cup_with_straw: Customize Your Smoothie :cup_with_straw:")
+st.write(
+  """Choose the fruits you want in your custom Smoothie!
+  """
 )
 
-# Process selected ingredients
-if selected_fruits:
+name_on_order = st.text_input("Name on Smoothie:")
+st.write('The name on your Smoothie will be:',name_on_order)
+cnx = st.connection("snowflake")
+session = cnx.session()
+my_dataframe = session.table("smoothies.public.fruit_options").select(col('FRUIT_NAME'),col('SEARCH_ON'))
+#st.dataframe(data=my_dataframe, use_container_width=True)
+#st.stop()
 
-    # Display nutrition info and build ingredients string
-    ingredients_string = ""
-    for fruit in selected_fruits:
-        ingredients_string += fruit + ", "
-        search_on = fruit_df.loc[fruit_df["FRUIT_NAME"] == fruit, "SEARCH_ON"].iloc[0]
-        
-        st.subheader(f"{fruit} Nutrition Information")
-        response = requests.get(f"https://my.smoothiefroot.com/api/fruit/{search_on}")
-        
-        if response.status_code == 200:
-            nutrition_data = pd.DataFrame([response.json()])
-            st.dataframe(nutrition_data)
-        else:
-            st.error(f"Failed to fetch nutrition info for {fruit}.")
+pd_df = my_dataframe.to_pandas()
+st.dataframe(pd_df)
+st.stop()
 
-    ingredients_string = ingredients_string.rstrip(", ")
+ingredients_list = st.multiselect(
+    'Choose up 5 ingredients:',
+     my_dataframe,
+     max_selections=5
+)
+if ingredients_list:
 
-    # Show final ingredients and SQL
-    st.markdown(f"**Ingredients:** {ingredients_string}")
-    st.markdown(f"**Name on Order:** {name_on_order}")
+    ingredients_string = ''
+    for fruit_chosen in ingredients_list:
+        ingredients_string += fruit_chosen + ' '
+        search_on=pd_df.loc[pd_df['FRUIT_NAME'] == fruit_chosen, 'SEARCH_ON'].iloc[0]
+        #st.write('The search value for ', fruit_chosen,' is ', search_on, '.')
+        st.subheader(fruit_chosen + 'Nutrition Information')
+        fruityvice_response = requests.get("https://my.smoothiefroot.com/api/fruit/" + search_on)
+        fv_df = st.dataframe(data=fruityvice_response.json(),use_container_width=True)
+    #st.write(ingredients_string)
 
-    insert_stmt = f"""
-        INSERT INTO smoothies.public.orders (ingredients, NAME_ON_ORDER)
-        VALUES ('{ingredients_string}', '{name_on_order}')
-    """
+    my_insert_stmt = """ insert into smoothies.public.orders(ingredients,NAME_ON_ORDER)
+            values ('""" + ingredients_string + """','"""+name_on_order+ """')"""
 
-    # Button to submit order
-    if st.button("Submit Order"):
-        try:
-            session.sql(insert_stmt).collect()
-            st.success("Your Smoothie is ordered! ✅")
-        except Exception as e:
-            st.error(f"Order failed: {e}")
+    st.write(my_insert_stmt)
+    time_to_insert = st.button('Submit Order')
+    
+    if time_to_insert:
+        session.sql(my_insert_stmt).collect()
+        st.success('Your Smoothie is ordered!', icon="✅")
