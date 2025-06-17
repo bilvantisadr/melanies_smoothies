@@ -4,69 +4,69 @@ import requests
 import pandas as pd
 from snowflake.snowpark.functions import col
 
-# App title and description
+# App title and instructions
 st.title(":cup_with_straw: Customize Your Smoothie :cup_with_straw:")
-st.write("Choose the fruits you want in your custom Smoothie!")
+st.write("Choose up to 5 fruits for your custom smoothie!")
 
-# Input field for name
+# Name input
 name_on_order = st.text_input("Name on Smoothie:")
-st.write('The name on your Smoothie will be:', name_on_order)
 
-# Connect to Snowflake and get fruit options
+# Connect to Snowflake
 cnx = st.connection("snowflake")
 session = cnx.session()
 
-# Query fruit options from Snowflake
-my_dataframe = session.table("smoothies.public.fruit_options").select(
-    col('FRUIT_NAME'), col('SEARCH_ON')
-)
+# Query fruit options
+fruit_df = session.table("smoothies.public.fruit_options").select(
+    col("FRUIT_NAME"), col("SEARCH_ON")
+).to_pandas()
 
-# Convert Snowpark DataFrame to Pandas
-pd_df = my_dataframe.to_pandas()
+# Show table of available fruits
+st.subheader("Available Fruits")
+st.dataframe(fruit_df, use_container_width=True)
 
-# Display the fruit options as a table
-st.dataframe(pd_df)
+# Get fruit names as a list for multiselect
+fruit_list = fruit_df["FRUIT_NAME"].tolist()
 
-# Convert fruit names to list for the multiselect
-ingredient_options = pd_df['FRUIT_NAME'].tolist()
-
-# Ingredient selection (up to 5)
-ingredients_list = st.multiselect(
-    'Choose up to 5 ingredients:',
-    ingredient_options,
+# Multiselect for ingredients (up to 5)
+selected_fruits = st.multiselect(
+    "Choose up to 5 ingredients:",
+    options=fruit_list,
     max_selections=5
 )
 
-# If user selected ingredients, show nutrition info and allow order
-if ingredients_list:
+# Process selected ingredients
+if selected_fruits:
 
-    ingredients_string = ''
-    for fruit_chosen in ingredients_list:
-        ingredients_string += fruit_chosen + ' '
-        search_on = pd_df.loc[pd_df['FRUIT_NAME'] == fruit_chosen, 'SEARCH_ON'].iloc[0]
+    # Display nutrition info and build ingredients string
+    ingredients_string = ""
+    for fruit in selected_fruits:
+        ingredients_string += fruit + ", "
+        search_on = fruit_df.loc[fruit_df["FRUIT_NAME"] == fruit, "SEARCH_ON"].iloc[0]
         
-        # Fetch and display nutrition info
-        st.subheader(f"{fruit_chosen} Nutrition Information")
-        fruityvice_response = requests.get(f"https://my.smoothiefroot.com/api/fruit/{search_on}")
+        st.subheader(f"{fruit} Nutrition Information")
+        response = requests.get(f"https://my.smoothiefroot.com/api/fruit/{search_on}")
         
-        if fruityvice_response.status_code == 200:
-            nutrition_data = fruityvice_response.json()
-            st.dataframe(data=nutrition_data, use_container_width=True)
+        if response.status_code == 200:
+            nutrition_data = pd.DataFrame([response.json()])
+            st.dataframe(nutrition_data)
         else:
-            st.error(f"Could not retrieve data for {fruit_chosen}.")
+            st.error(f"Failed to fetch nutrition info for {fruit}.")
 
-    # Prepare SQL insert statement
-    my_insert_stmt = f"""
+    ingredients_string = ingredients_string.rstrip(", ")
+
+    # Show final ingredients and SQL
+    st.markdown(f"**Ingredients:** {ingredients_string}")
+    st.markdown(f"**Name on Order:** {name_on_order}")
+
+    insert_stmt = f"""
         INSERT INTO smoothies.public.orders (ingredients, NAME_ON_ORDER)
-        VALUES ('{ingredients_string.strip()}', '{name_on_order}')
+        VALUES ('{ingredients_string}', '{name_on_order}')
     """
 
-    # Display the query for reference (optional)
-    st.code(my_insert_stmt)
-
-    # Submit order button
-    time_to_insert = st.button('Submit Order')
-
-    if time_to_insert:
-        session.sql(my_insert_stmt).collect()
-        st.success('Your Smoothie is ordered! ✅')
+    # Button to submit order
+    if st.button("Submit Order"):
+        try:
+            session.sql(insert_stmt).collect()
+            st.success("Your Smoothie is ordered! ✅")
+        except Exception as e:
+            st.error(f"Order failed: {e}")
